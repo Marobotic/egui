@@ -129,6 +129,11 @@ struct GlutinWindowContext {
     window_from_viewport: OrderedViewportIdMap<WindowId>,
 
     focused_viewport: Option<ViewportId>,
+
+    /// For the AccessKit adapters of windows created after the root one (each viewport its
+    /// own: dialogs, menus). Set once the root's adapter is made.
+    #[cfg(feature = "accesskit")]
+    accesskit_proxy: Option<EventLoopProxy<UserEvent>>,
 }
 
 struct Viewport {
@@ -387,6 +392,7 @@ impl<'app> GlowWinitApp<'app> {
         #[cfg(feature = "accesskit")]
         {
             let event_loop_proxy = self.repaint_proxy.lock().clone();
+            glutin.accesskit_proxy = Some(event_loop_proxy.clone());
             let viewport = glutin.viewports.get_mut(&ViewportId::ROOT).unwrap(); // we always have a root
             if let Viewport {
                 window: Some(window),
@@ -1355,6 +1361,8 @@ impl GlutinWindowContext {
             clipboard_shortcuts: native_options.clipboard_shortcuts,
             window_from_viewport,
             focused_viewport: Some(ViewportId::ROOT),
+            #[cfg(feature = "accesskit")]
+            accesskit_proxy: None,
         };
 
         slf.initialize_window(ViewportId::ROOT, event_loop)?;
@@ -1405,6 +1413,8 @@ impl GlutinWindowContext {
             viewport.window.insert(window)
         };
 
+        #[cfg(feature = "accesskit")]
+        let fresh = viewport.egui_winit.is_none();
         viewport.egui_winit.get_or_insert_with(|| {
             log::debug!("Initializing egui_winit for viewport {viewport_id:?}");
             let mut egui_winit = egui_winit::State::new(
@@ -1418,6 +1428,19 @@ impl GlutinWindowContext {
             egui_winit.set_clipboard_shortcuts(self.clipboard_shortcuts);
             egui_winit
         });
+
+        // Every later window gets its AccessKit adapter too (only the root's was made), so a
+        // screen reader reads dialogs and menus. The adapter must be made before the window is
+        // first shown: only windows created hidden get one (Wayland can't tell: none there).
+        #[cfg(feature = "accesskit")]
+        if fresh
+            && viewport_id != ViewportId::ROOT
+            && window.is_visible() == Some(false)
+            && let (Some(proxy), Some(egui_winit)) =
+                (&self.accesskit_proxy, viewport.egui_winit.as_mut())
+        {
+            egui_winit.init_accesskit(event_loop, window, proxy.clone());
+        }
 
         if viewport.gl_surface.is_none() {
             log::debug!("Creating a gl_surface for viewport {viewport_id:?}");
