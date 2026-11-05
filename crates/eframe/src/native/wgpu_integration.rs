@@ -93,6 +93,11 @@ pub struct SharedState {
 
     /// Passed on to each [`egui_winit::State`]. See [`NativeOptions::clipboard_shortcuts`].
     clipboard_shortcuts: bool,
+
+    /// For the AccessKit adapters of windows created after the root one (each viewport its
+    /// own: dialogs, menus).
+    #[cfg(feature = "accesskit")]
+    accesskit_proxy: Option<EventLoopProxy<UserEvent>>,
 }
 
 pub type Viewports = egui::OrderedViewportIdMap<Viewport>;
@@ -165,6 +170,8 @@ impl<'app> WgpuWinitApp<'app> {
             painter,
             viewport_from_window,
             clipboard_shortcuts,
+            #[cfg(feature = "accesskit")]
+            accesskit_proxy,
             ..
         } = &mut *shared;
 
@@ -175,6 +182,8 @@ impl<'app> WgpuWinitApp<'app> {
                 viewport_from_window,
                 painter,
                 *clipboard_shortcuts,
+                #[cfg(feature = "accesskit")]
+                accesskit_proxy.as_ref(),
             );
         }
     }
@@ -187,6 +196,8 @@ impl<'app> WgpuWinitApp<'app> {
             viewport_from_window,
             painter,
             clipboard_shortcuts,
+            #[cfg(feature = "accesskit")]
+            accesskit_proxy,
             ..
         } = &mut *running.shared.borrow_mut();
 
@@ -204,6 +215,8 @@ impl<'app> WgpuWinitApp<'app> {
             viewport_from_window,
             painter,
             *clipboard_shortcuts,
+            #[cfg(feature = "accesskit")]
+            accesskit_proxy.as_ref(),
         );
     }
 
@@ -374,6 +387,8 @@ impl<'app> WgpuWinitApp<'app> {
             focused_viewport: Some(ViewportId::ROOT),
             resized_viewport: None,
             clipboard_shortcuts: self.native_options.clipboard_shortcuts,
+            #[cfg(feature = "accesskit")]
+            accesskit_proxy: Some(self.repaint_proxy.lock().clone()),
         }));
 
         {
@@ -1135,6 +1150,7 @@ impl Viewport {
         windows_id: &mut HashMap<WindowId, ViewportId>,
         painter: &mut egui_wgpu::winit::Painter,
         clipboard_shortcuts: bool,
+        #[cfg(feature = "accesskit")] accesskit_proxy: Option<&EventLoopProxy<UserEvent>>,
     ) {
         if self.window.is_some() {
             return; // we already have one
@@ -1166,6 +1182,19 @@ impl Viewport {
                     painter.max_texture_side(),
                 );
                 egui_winit.set_clipboard_shortcuts(clipboard_shortcuts);
+
+                // Every later window gets its AccessKit adapter too (only the root's was made),
+                // so a screen reader reads dialogs and menus. The adapter must be made before the
+                // window is first shown: only windows created hidden get one (Wayland can't
+                // tell: none there). As in the glow integration.
+                #[cfg(feature = "accesskit")]
+                if viewport_id != ViewportId::ROOT
+                    && window.is_visible() == Some(false)
+                    && let Some(proxy) = accesskit_proxy
+                {
+                    egui_winit.init_accesskit(event_loop, &window, proxy.clone());
+                }
+
                 self.egui_winit = Some(egui_winit);
 
                 egui_winit::update_viewport_info(&mut self.info, egui_ctx, &window, true);
@@ -1239,6 +1268,8 @@ fn render_immediate_viewport(
             painter,
             viewport_from_window,
             clipboard_shortcuts,
+            #[cfg(feature = "accesskit")]
+            accesskit_proxy,
             ..
         } = &mut *shared.borrow_mut();
 
@@ -1258,6 +1289,8 @@ fn render_immediate_viewport(
                     viewport_from_window,
                     painter,
                     *clipboard_shortcuts,
+                    #[cfg(feature = "accesskit")]
+                    accesskit_proxy.as_ref(),
                 );
             });
         }
