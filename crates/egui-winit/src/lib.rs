@@ -14,6 +14,8 @@ use std::collections::HashSet;
 
 #[cfg(feature = "accesskit")]
 pub use accesskit_winit;
+#[cfg(feature = "accesskit")]
+mod accesskit_initial_tree;
 pub use egui;
 #[cfg(feature = "accesskit")]
 use egui::accesskit;
@@ -260,6 +262,11 @@ pub struct State {
 
     #[cfg(feature = "accesskit")]
     pub accesskit: Option<accesskit_winit::Adapter>,
+
+    /// The last accessibility tree this window's frames produced, for the platform's first
+    /// request ([`accesskit_initial_tree`]).
+    #[cfg(feature = "accesskit")]
+    accesskit_last_tree: accesskit_initial_tree::LastTree,
 
     allow_ime: bool,
     ime_reset: ime_reset::ResetBridge<winit::window::WindowId>,
@@ -651,6 +658,8 @@ impl State {
 
             #[cfg(feature = "accesskit")]
             accesskit: None,
+            #[cfg(feature = "accesskit")]
+            accesskit_last_tree: Default::default(),
 
             allow_ime: false,
             ime_reset: Default::default(),
@@ -709,6 +718,10 @@ impl State {
         slf
     }
 
+    /// The window's AccessKit adapter. Its first request is answered with the window's last
+    /// tree when there is one (a placeholder otherwise), and turns AccessKit on and repaints the
+    /// window through `event_loop_proxy` ([`accesskit_winit::WindowEvent::InitialTreeRequested`]),
+    /// as action requests and deactivation also arrive.
     #[cfg(feature = "accesskit")]
     pub fn init_accesskit<T: From<accesskit_winit::Event> + Send>(
         &mut self,
@@ -718,9 +731,22 @@ impl State {
     ) {
         profiling::function_scope!();
 
-        self.accesskit = Some(accesskit_winit::Adapter::with_event_loop_proxy(
+        let window_id = window.id();
+        let proxy = event_loop_proxy.clone();
+        let initial_tree = accesskit_initial_tree::InitialTree {
+            last: self.accesskit_last_tree.clone(),
+            request_frame: Box::new(move || {
+                let event = accesskit_winit::Event {
+                    window_id,
+                    window_event: accesskit_winit::WindowEvent::InitialTreeRequested,
+                };
+                proxy.send_event(event.into()).ok();
+            }),
+        };
+        self.accesskit = Some(accesskit_winit::Adapter::with_mixed_handlers(
             event_loop,
             window,
+            initial_tree,
             event_loop_proxy,
         ));
     }
@@ -3525,11 +3551,14 @@ impl State {
         }
 
         #[cfg(feature = "accesskit")]
-        if let Some(accesskit) = self.accesskit.as_mut()
-            && let Some(update) = accesskit_update
-        {
+        if let Some(update) = accesskit_update {
             profiling::scope!("accesskit");
-            accesskit.update_if_active(|| update);
+            if let Some(accesskit) = self.accesskit.as_mut() {
+                accesskit.update_if_active(|| update.clone());
+                // Kept for the first request of a platform that asks again (it is answered
+                // with it then), only while there is an adapter to ask.
+                self.accesskit_last_tree.keep(update);
+            }
         }
 
         #[cfg(not(feature = "accesskit"))]
