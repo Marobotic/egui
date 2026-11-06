@@ -117,7 +117,8 @@ pub struct RenderState {
     /// Wgpu adapter used for rendering.
     pub adapter: wgpu::Adapter,
 
-    /// All the available adapters.
+    /// The adapter in use, as enumerated (the others are let go once one is chosen: each holds
+    /// a device on Direct3D 12, gfx-rs/wgpu#9932).
     ///
     /// This is not available on web.
     /// On web, we always select WebGPU is available, then fall back to WebGL if not.
@@ -288,7 +289,26 @@ impl RenderState {
                 .await
                 .map_err(WgpuError::CreateRenderer)?;
         #[cfg(not(feature = "winit"))]
-        let renderer = Renderer::new(&device, target_format, options);
+        let mut renderer = Renderer::new(&device, target_format, options);
+        #[cfg(feature = "winit")]
+        let mut renderer = renderer;
+
+        // Intel Iris Xe on Direct3D 12 skips writing all-zero texel blocks (gfx-rs/wgpu#10651).
+        let info = adapter.get_info();
+        if info.backend == wgpu::Backend::Dx12 && info.name.contains("Iris(R) Xe") {
+            log::info!("Iris Xe on Direct3D 12: transparent texels uploaded as (0, 0, 0, 1)");
+            renderer.set_zero_texel_guard(true);
+        }
+
+        // Only the adapter in use is kept: on Direct3D 12 every enumerated adapter holds a device,
+        // which keeps a laptop's second graphics card awake and some of its memory taken
+        // (gfx-rs/wgpu#9932, emilk/egui#8704).
+        #[cfg(not(target_arch = "wasm32"))]
+        let available_adapters = {
+            let mut list = available_adapters;
+            list.retain(|a| a.get_info() == info);
+            list
+        };
 
         // On wasm, depending on feature flags, wgpu objects may or may not implement sync.
         // It doesn't make sense to switch to Rc for that special usecase, so simply disable the lint.

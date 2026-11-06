@@ -259,6 +259,11 @@ pub struct Renderer {
 
     options: RendererOptions,
 
+    /// Upload fully transparent texels as `(0, 0, 0, 1)` instead of `(0, 0, 0, 0)`: Intel Iris Xe
+    /// on Direct3D 12 can leave a 4x4 block of all-zero texels unwritten, so it samples stale
+    /// memory there (gfx-rs/wgpu#10651, #3552). Set by [`crate::RenderState::create`].
+    zero_texel_guard: bool,
+
     /// Storage for resources shared with all invocations of [`CallbackTrait`]'s methods.
     ///
     /// See also [`CallbackTrait`].
@@ -489,8 +494,15 @@ impl Renderer {
             next_user_texture_id: 0,
             samplers: HashMap::default(),
             options,
+            zero_texel_guard: false,
             callback_resources: CallbackResources::default(),
         }
+    }
+
+    /// Upload fully transparent texels as `(0, 0, 0, 1)` (see gfx-rs/wgpu#10651): for drivers that
+    /// skip writing all-zero blocks. Blending such a texel darkens what is under it by 1/255.
+    pub fn set_zero_texel_guard(&mut self, on: bool) {
+        self.zero_texel_guard = on;
     }
 
     /// Executes the egui renderer onto an existing wgpu renderpass.
@@ -659,7 +671,24 @@ impl Renderer {
                     image.pixels.len(),
                     "Mismatch between texture size and texel count"
                 );
-                Cow::Borrowed(&image.pixels)
+                if self.zero_texel_guard && image.pixels.contains(&epaint::Color32::TRANSPARENT) {
+                    let guard = epaint::Color32::from_rgba_premultiplied(0, 0, 0, 1);
+                    Cow::Owned(
+                        image
+                            .pixels
+                            .iter()
+                            .map(|&c| {
+                                if c == epaint::Color32::TRANSPARENT {
+                                    guard
+                                } else {
+                                    c
+                                }
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                } else {
+                    Cow::Borrowed(&image.pixels)
+                }
             }
         };
         let data_bytes: &[u8] = bytemuck::cast_slice(data_color32.as_slice());
