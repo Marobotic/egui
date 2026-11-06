@@ -700,8 +700,11 @@ impl GlowWinitRunning<'_> {
             let mut raw_input = egui_winit.take_egui_input(window);
             let viewport_ui_cb = viewport.viewport_ui_cb.clone();
 
+            // The app asked for its UI while the window isn't visible (it opens a window).
+            let asked = egui_ctx.take_ui_pass_request(viewport_id);
             let show_ui = mode == PassMode::Full
                 && (is_visible
+                    || asked
                     || is_viewport_or_descendant_visible(&glutin.viewports, viewport_id));
 
             self.integration.pre_update();

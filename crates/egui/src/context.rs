@@ -451,6 +451,10 @@ struct ContextImpl {
 
     is_accesskit_enabled: bool,
 
+    /// Viewports whose next frame runs the app's UI even while they aren't visible
+    /// ([`Context::request_ui_pass`]).
+    ui_pass_requested: ViewportIdSet,
+
     loaders: Arc<Loaders>,
 
     themes: theme::Themes,
@@ -4311,6 +4315,21 @@ impl Context {
         });
     }
 
+    /// Run the UI of `viewport` at its next frame even if it isn't visible (minimized,
+    /// occluded), where a backend would otherwise run only the app's logic. For an app that is
+    /// about to open a window of its own from there: an immediate viewport is created by its
+    /// parent's UI. Wakes the viewport.
+    pub fn request_ui_pass(&self, viewport: ViewportId) {
+        self.write(|ctx| ctx.ui_pass_requested.insert(viewport));
+        self.request_repaint_of(viewport);
+    }
+
+    /// Whether [`Self::request_ui_pass`] asked for a UI pass of `viewport`; the request is
+    /// taken (for backends).
+    pub fn take_ui_pass_request(&self, viewport: ViewportId) -> bool {
+        self.write(|ctx| ctx.ui_pass_requested.remove(&viewport))
+    }
+
     /// Enable generation of AccessKit tree updates in all future frames.
     pub fn enable_accesskit(&self) {
         self.write(|ctx| ctx.is_accesskit_enabled = true);
@@ -5528,5 +5547,16 @@ mod test {
             );
             output.drop_without_applying_deltas();
         }
+    }
+
+    /// A viewport that isn't visible runs its UI once when asked to (an app opening a window
+    /// from a minimized one), and the request doesn't stay.
+    #[test]
+    fn a_ui_pass_request_is_taken_once() {
+        let ctx = Context::default();
+        assert!(!ctx.take_ui_pass_request(crate::ViewportId::ROOT));
+        ctx.request_ui_pass(crate::ViewportId::ROOT);
+        assert!(ctx.take_ui_pass_request(crate::ViewportId::ROOT));
+        assert!(!ctx.take_ui_pass_request(crate::ViewportId::ROOT));
     }
 }

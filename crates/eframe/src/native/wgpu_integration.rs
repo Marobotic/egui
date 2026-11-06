@@ -715,8 +715,12 @@ impl WgpuWinitRunning<'_> {
             };
             let mut raw_input = egui_winit.take_egui_input(window);
 
+            // The app asked for its UI while the window isn't visible (it opens a window).
+            let asked = integration.egui_ctx.take_ui_pass_request(viewport_id);
             let show_ui = mode == PassMode::Full
-                && (is_visible || is_viewport_or_descendant_visible(viewports, viewport_id));
+                && (is_visible
+                    || asked
+                    || is_viewport_or_descendant_visible(viewports, viewport_id));
 
             integration.pre_update();
 
