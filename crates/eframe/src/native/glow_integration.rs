@@ -1259,21 +1259,37 @@ impl GlutinWindowContext {
         let (window, gl_config) = {
             profiling::scope!("DisplayBuilder::build");
 
-            display_builder
-                .build(
+            /// No configuration matched: the picker can't return one, so it unwinds (without a
+            /// panic: no panic hook runs) and this becomes an error, for the caller to try another
+            /// renderer (a computer whose only OpenGL is Windows' own 1.1, Remote Desktop).
+            struct NoMatchingConfig;
+            let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                display_builder.build(
                     event_loop,
                     config_template_builder.clone(),
                     |mut config_iterator| {
-                        let config = config_iterator.next().expect(
-                            "failed to find a matching configuration for creating glutin config",
-                        );
+                        let Some(config) = config_iterator.next() else {
+                            std::panic::resume_unwind(Box::new(NoMatchingConfig));
+                        };
                         log::debug!(
                             "using the first config from config picker closure. config: {config:?}"
                         );
                         config
                     },
                 )
-                .map_err(|e| crate::Error::NoGlutinConfigs(config_template_builder.build(), e))?
+            }));
+            match built {
+                Ok(built) => built.map_err(|e| {
+                    crate::Error::NoGlutinConfigs(config_template_builder.build(), e)
+                })?,
+                Err(payload) if payload.is::<NoMatchingConfig>() => {
+                    return Err(crate::Error::NoGlutinConfigs(
+                        config_template_builder.build(),
+                        "no matching configuration".into(),
+                    ));
+                }
+                Err(payload) => std::panic::resume_unwind(payload),
+            }
         };
         if let Some(window) = &window {
             egui_winit::apply_viewport_builder_to_window(egui_ctx, window, &viewport_builder);
