@@ -181,6 +181,10 @@ pub struct EpiIntegration {
     last_auto_save: Instant,
     pub beginning: Instant,
     is_first_frame: bool,
+    /// Show the root window once its first frame is painted: false when the app built it
+    /// hidden (`ViewportBuilder::with_visible(false)`), to show it later itself
+    /// (`ViewportCommand::Visible(true)`), e.g. a program that starts in the notification area.
+    show_after_first_frame: bool,
     pub egui_ctx: egui::Context,
 
     /// Input that we have received, but not yet given to egui,
@@ -293,6 +297,7 @@ impl EpiIntegration {
                 .checked_sub(web_time::Duration::from_secs_f64(egui_ctx.time()))
                 .unwrap_or_else(Instant::now),
             is_first_frame: true,
+            show_after_first_frame: native_options.viewport.visible != Some(false),
             egui_ctx,
         }
     }
@@ -446,10 +451,13 @@ impl EpiIntegration {
             if let Some(window_settings) = &self.restored_window_settings {
                 window_settings.before_first_show(window);
             }
-            // We keep hidden until we've painted something. See https://github.com/emilk/egui/pull/2279
-            window.set_visible(true);
-            if let Some(window_settings) = &self.restored_window_settings {
-                window_settings.after_first_show(window);
+            // A root window the app built hidden stays hidden: the app shows it when it wants.
+            if self.show_after_first_frame {
+                // We keep hidden until we've painted something. See https://github.com/emilk/egui/pull/2279
+                window.set_visible(true);
+                if let Some(window_settings) = &self.restored_window_settings {
+                    window_settings.after_first_show(window);
+                }
             }
         }
     }
