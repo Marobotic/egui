@@ -18,6 +18,7 @@ pub mod grapheme;
 mod index;
 mod line_break;
 mod styled_metrics;
+mod system_rasterizer;
 mod text_layout;
 mod text_layout_types;
 mod unicode;
@@ -35,6 +36,9 @@ pub use {
     },
     index::{ByteIndex, ByteRange, ByteRangeExt, CharIndex, CharRange, CharRangeExt},
     line_break::{LineBreak, LineBreakKind, LineBreaker, SimpleLineBreaker},
+    system_rasterizer::{
+        SystemGlyph, SystemGlyphRequest, SystemRasterizeFn, set_system_rasterizer,
+    },
     text_layout_types::*,
 };
 

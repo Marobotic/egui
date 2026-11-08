@@ -3179,6 +3179,7 @@ pub fn font_tweak_ui(ui: &mut Ui, tweak: &mut FontTweak, axes: &[FontVariationAx
                 tab_size,
                 subpixel_binning,
                 fallback_align,
+                system_rasterizer,
             } = tweak;
 
             ui.label("Scale");
@@ -3286,6 +3287,11 @@ pub fn font_tweak_ui(ui: &mut Ui, tweak: &mut FontTweak, axes: &[FontVariationAx
                 ui.radio_value(fallback_align, FallbackAlign::Baseline, "baseline")
                     .on_hover_text("Share the first font's baseline, and grow the row to fit.");
             });
+            ui.end_row();
+
+            ui.label("system_rasterizer");
+            ui.checkbox(system_rasterizer, "")
+                .on_hover_text("Draw outline glyphs with the system rasterizer, if one is installed.");
             ui.end_row();
 
             // Show variation axes if we have them:

@@ -361,6 +361,9 @@ pub struct FontFace {
     tweak: FontTweak,
     subpixel_binning: bool,
 
+    /// Index of this face in its font file, for the system rasterizer.
+    index: u32,
+
     /// Cached `harfrust` shaper data (parsed GSUB/GPOS tables).
     /// `ShaperData` is `Copy` — lives outside the `self_cell`.
     shaper_data: harfrust::ShaperData,
@@ -448,6 +451,7 @@ impl FontFace {
             font,
             tweak,
             subpixel_binning,
+            index,
             shaper_data,
             glyph_id_cache: Default::default(),
             advance_width_cache: Default::default(),
@@ -701,9 +705,52 @@ impl FontFace {
         glyph_id: GlyphId,
         bin: SubpixelBin,
     ) -> Option<GlyphBitmap> {
+        if let Some(bitmap) = self.rasterize_with_system(metrics, glyph_id, bin) {
+            return Some(bitmap);
+        }
         let hinting_target = self.tweak.hinting_target.into();
         self.font
             .rasterize_glyph(metrics, glyph_id, bin, hinting_target)
+    }
+
+    /// The glyph as the system rasterizer draws it, when this font asks for it
+    /// ([`FontTweak::system_rasterizer`]) and one is installed. Not for variable-font instances
+    /// (the system would draw the default instance) or color glyphs.
+    fn rasterize_with_system(
+        &self,
+        metrics: &StyledMetrics,
+        glyph_id: GlyphId,
+        bin: SubpixelBin,
+    ) -> Option<GlyphBitmap> {
+        if !self.tweak.system_rasterizer || !metrics.location.coords().is_empty() {
+            return None;
+        }
+        #[cfg(feature = "color_fonts")]
+        if self.font.borrow_dependent().has_color_glyphs {
+            return None;
+        }
+        let rasterize = super::system_rasterizer::system_rasterizer()?;
+        let glyph = rasterize(&super::SystemGlyphRequest {
+            font_data: AsRef::<[u8]>::as_ref(self.font.borrow_owner().as_ref()),
+            index: self.index,
+            glyph_id: glyph_id.to_u32(),
+            size_px: metrics.scale,
+            offset_px: vec2(bin.as_float(), 0.0),
+        })?;
+        let [width, height] = glyph.size;
+        if width == 0 || height == 0 || glyph.coverage.len() != width * height {
+            return None;
+        }
+        let pixels = glyph
+            .coverage
+            .iter()
+            .map(|&a| Color32::from_rgba_premultiplied(a, a, a, a))
+            .collect();
+        Some(GlyphBitmap {
+            image: ColorImage::new([width, height], pixels),
+            offset_px: vec2(glyph.offset_px[0] as f32, glyph.offset_px[1] as f32),
+            is_color: false,
+        })
     }
 
     /// Render several glyphs into one bitmap, each at its offset from the shared origin.

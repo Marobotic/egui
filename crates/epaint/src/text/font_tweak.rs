@@ -39,6 +39,14 @@ pub struct FontTweak {
     /// Has no effect when hinting is disabled (see [`Self::hinting`]).
     pub hinting_target: HintingTarget,
 
+    /// Draw this font's outline glyphs with the system rasterizer the application installed
+    /// ([`set_system_rasterizer`](crate::text::set_system_rasterizer)), e.g. DirectWrite, when
+    /// there is one; egui draws them otherwise, and always draws color glyphs and clusters of
+    /// several glyphs. Layout doesn't change: only the pixels.
+    ///
+    /// Default: `false`.
+    pub system_rasterizer: bool,
+
     /// Override the global sub-pixel binning setting for this specific font.
     ///
     /// `None` means use the global setting in [`TextOptions::subpixel_binning`](crate::text::TextOptions::subpixel_binning).
@@ -75,6 +83,7 @@ impl Default for FontTweak {
             y_offset: 0.0,
             hinting: None,
             hinting_target: HintingTarget::default(),
+            system_rasterizer: false,
             subpixel_binning: None,
             coords: VariationCoords::default(),
             thin_space_width: 0.5,
